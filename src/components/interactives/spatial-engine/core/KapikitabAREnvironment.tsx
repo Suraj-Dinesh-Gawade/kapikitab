@@ -1,108 +1,208 @@
+// src/components/interactives/spatial-engine/KapikitabAREnvironment.tsx
 'use client';
 
 import React, { useState, Suspense, useRef, createContext, useContext } from 'react';
 import * as THREE from 'three';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Environment, Grid } from '@react-three/drei';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrbitControls, Environment, Grid, Text, RoundedBox } from '@react-three/drei';
 import { createXRStore, XR, useXRHitTest, useXR } from '@react-three/xr';
 
-// 1. Initialize engine variables
-const store = createXRStore();
+// 1. Configure XR store with high frame-rate & hit-test support
+const store = createXRStore({
+  hitTest: true,
+  foveation: 0, // Maximum sharpness on mobile screens
+});
 const matrixHelper = new THREE.Matrix4();
 
-// 2. Create a global Context so any button inside the lab can reset the AR anchor
-export const ARAnchorContext = createContext<(() => void) | null>(null);
+export const ARAnchorContext = createContext<{
+  resetAnchor: () => void;
+  isAR: boolean;
+  arScale: number;
+  setArScale: React.Dispatch<React.SetStateAction<number>>;
+} | null>(null);
 
-// Custom hook so future UI buttons can easily access the re-anchor function
 export function useARAnchor() {
   return useContext(ARAnchorContext);
 }
 
-// 3. The Internal Scene Manager (Handles PC vs AR routing)
-function ARSceneManager({ children }: { children: React.ReactNode }) {
-  const isAR = useXR((state) => state.mode === 'immersive-ar');
-  const [anchorPos, setAnchorPos] = useState<THREE.Vector3 | null>(null);
-  const reticleRef = useRef<THREE.Mesh>(null);
+// Animated Apple Vision Pro-style Placement Reticle
+function SpatialPlacementReticle({
+  onPlace,
+}: {
+  onPlace: (pos: THREE.Vector3, quat: THREE.Quaternion) => void;
+}) {
+  const reticleRef = useRef<THREE.Group>(null);
+  const pulseRef = useRef<THREE.Mesh>(null);
+  const hasHit = useRef(false);
 
   useXRHitTest((results, getWorldMatrix) => {
-    if (isAR && !anchorPos && reticleRef.current && results.length > 0) {
+    if (reticleRef.current && results.length > 0) {
       getWorldMatrix(matrixHelper, results[0]);
-      reticleRef.current.matrixAutoUpdate = false;
-      reticleRef.current.matrix.copy(matrixHelper);
+      reticleRef.current.position.setFromMatrixPosition(matrixHelper);
+      reticleRef.current.quaternion.setFromRotationMatrix(matrixHelper);
+      hasHit.current = true;
     }
-  }, "viewer");
+  }, 'viewer');
 
-  // PC MODE: Center the lab perfectly on screen
-  if (!isAR) {
-    return (
-      <>
-        <Grid position={[0, -0.05, 0]} args={[10, 10]} cellColor="#10b981" sectionColor="#10b981" fadeDistance={5} fadeStrength={1.5} />
-        {children}
-      </>
-    );
-  }
+  useFrame((state) => {
+    if (pulseRef.current) {
+      const s = 1 + Math.sin(state.clock.elapsedTime * 4) * 0.08;
+      pulseRef.current.scale.set(s, s, s);
+    }
+  });
 
-  // AR MODE: Execute surface detection state machine
   return (
-    <>
-      {!anchorPos && (
-        <mesh
-          ref={reticleRef}
-          onPointerDown={() => {
-            if (reticleRef.current) {
-              const pos = new THREE.Vector3();
-              pos.setFromMatrixPosition(reticleRef.current.matrix);
-              setAnchorPos(pos);
-            }
-          }}
-        >
-          <ringGeometry args={[0.15, 0.2, 32]} />
-          <meshStandardMaterial color="#10b981" transparent opacity={0.8} side={THREE.DoubleSide} />
-        </mesh>
-      )}
+    <group
+      ref={reticleRef}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (reticleRef.current) {
+          onPlace(
+            reticleRef.current.position.clone(),
+            reticleRef.current.quaternion.clone()
+          );
+        }
+      }}
+    >
+      {/* Outer Glowing Glass Ring */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} ref={pulseRef} frustumCulled={false}>
+        <ringGeometry args={[0.14, 0.17, 48]} />
+        <meshBasicMaterial
+          color="#34d399"
+          transparent
+          opacity={0.95}
+          side={THREE.DoubleSide}
+          depthTest={false}
+        />
+      </mesh>
 
-      {anchorPos && (
-        <group position={anchorPos}>
-          {/* Wrap children in the Context Provider so they can trigger a reset */}
-          <ARAnchorContext.Provider value={() => setAnchorPos(null)}>
-            {children}
-          </ARAnchorContext.Provider>
-        </group>
-      )}
-    </>
+      {/* Inner Target Disc */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} frustumCulled={false}>
+        <circleGeometry args={[0.12, 32]} />
+        <meshBasicMaterial
+          color="#10b981"
+          transparent
+          opacity={0.22}
+          side={THREE.DoubleSide}
+          depthTest={false}
+        />
+      </mesh>
+
+      {/* Floating Spatial Instruction */}
+      <Text
+        position={[0, 0.14, 0]}
+        fontSize={0.032}
+        color="#ffffff"
+        anchorX="center"
+        anchorY="middle"
+        outlineWidth={0.003}
+        outlineColor="#000000"
+      >
+        TAP CIRCLE TO PLACE LAB HERE
+      </Text>
+    </group>
   );
 }
 
-// 4. The Main Exported Wrapper
-export default function KapikitabAREnvironment({ children }: { children: React.ReactNode }) {
+function ARSceneManager({ children }: { children: React.ReactNode }) {
+  const isAR = useXR((state) => state.mode === 'immersive-ar');
+  const [anchorPos, setAnchorPos] = useState<THREE.Vector3 | null>(null);
+  const [anchorYaw, setAnchorYaw] = useState<number>(0);
+  const [arScale, setArScale] = useState<number>(0.65); // Ideal tabletop scale (65% of 1m bench)
+
+  // PC MODE: Render standard OrbitControls + Grid
+  if (!isAR) {
+    return (
+      <ARAnchorContext.Provider
+        value={{
+          resetAnchor: () => setAnchorPos(null),
+          isAR: false,
+          arScale: 1,
+          setArScale,
+        }}
+      >
+        <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
+        <Environment preset="city" />
+        <Grid
+          position={[0, -0.05, 0]}
+          args={[10, 10]}
+          cellColor="#10b981"
+          sectionColor="#10b981"
+          fadeDistance={5}
+          fadeStrength={1.5}
+        />
+        {children}
+      </ARAnchorContext.Provider>
+    );
+  }
+
+  // AR MODE: Clean passthrough without OrbitControls fighting the phone's gyroscope
   return (
-    // THE FIX: Changed to w-full h-full absolute inset-0 to perfectly fill the parent container!
-    // Removed margins, fixed aspect ratios, and hardcoded borders.
+    <ARAnchorContext.Provider
+      value={{
+        resetAnchor: () => setAnchorPos(null),
+        isAR: true,
+        arScale,
+        setArScale,
+      }}
+    >
+      {!anchorPos ? (
+        <SpatialPlacementReticle
+          onPlace={(pos, quat) => {
+            const euler = new THREE.Euler().setFromQuaternion(quat, 'YXZ');
+            setAnchorYaw(euler.y);
+            setAnchorPos(pos);
+          }}
+        />
+      ) : (
+        <group
+          position={anchorPos}
+          rotation={[0, anchorYaw, 0]}
+          scale={[arScale, arScale, arScale]}
+        >
+          {children}
+        </group>
+      )}
+    </ARAnchorContext.Provider>
+  );
+}
+
+export default function KapikitabAREnvironment({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
     <div className="w-full h-full absolute inset-0 overflow-hidden z-10 pointer-events-auto">
-      
       {/* Universal AR Entry Button */}
       <div className="absolute top-6 right-6 z-50">
-        <button 
+        <button
           onClick={() => store.enterAR()}
-          className="bg-stone-200/90 backdrop-blur-md text-stone-900 px-6 py-2 rounded-full text-xs font-bold tracking-widest uppercase shadow-xl hover:bg-white transition-colors"
+          className="bg-emerald-400 text-stone-950 px-6 py-2.5 rounded-full text-xs font-extrabold tracking-widest uppercase shadow-xl hover:bg-emerald-300 transition-all"
         >
-          Enter AR
+          View in Your Room (AR)
         </button>
       </div>
 
-      {/* The Universal 3D Canvas */}
-      <Canvas camera={{ position: [0, 1.5, 4], fov: 50, near: 0.01, far: 1000 }} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}> 
+      {/* Optimized depth buffer (near: 0.05, far: 100) prevents mobile AR distortion */}
+      <Canvas
+        gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
+        camera={{ position: [0, 1.4, 1.8], fov: 50, near: 0.05, far: 100 }}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+        }}
+      >
         <XR store={store}>
           <Suspense fallback={null}>
-            <ambientLight intensity={0.6} />
-            <directionalLight position={[5, 10, 5]} intensity={1.5} castShadow />
-            <OrbitControls makeDefault />
-            <Environment preset="city" />
-            
-            <ARSceneManager>
-              {children}
-            </ARSceneManager>
+            <ambientLight intensity={1.1} />
+            <directionalLight position={[3, 6, 4]} intensity={1.8} />
+            <directionalLight position={[-3, 2, -2]} intensity={0.6} />
 
+            <ARSceneManager>{children}</ARSceneManager>
           </Suspense>
         </XR>
       </Canvas>

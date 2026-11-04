@@ -1,10 +1,10 @@
+// src/components/interactives/spatial-engine/labs/HumanEyeChapter10Lab.tsx
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
-import { Text, Line, Html, RoundedBox } from '@react-three/drei';
-import { useXR } from '@react-three/xr';
+import { Text, Line, RoundedBox } from '@react-three/drei';
 import {
   Play,
   Pause,
@@ -19,8 +19,9 @@ import {
   RotateCcw,
 } from 'lucide-react';
 
-import KapikitabAREnvironment from '../core/KapikitabAREnvironment';
-// Import your 10,086-line SceneGraph JSON directly
+import KapikitabAREnvironment, {
+  useARAnchor,
+} from '../core/KapikitabAREnvironment';
 import sceneGraphData from './ch_chapter_10__pdf_graph.json';
 
 // ============================================================================
@@ -52,7 +53,6 @@ const CATEGORY_STYLES: Record<
   },
 };
 
-// Format instanceId into clean readable label
 function formatEntityLabel(instanceId: string): string {
   return instanceId
     .replace(/_main$/, '')
@@ -62,20 +62,20 @@ function formatEntityLabel(instanceId: string): string {
 }
 
 // ============================================================================
-// 1. CAMERA DIRECTOR (Smoothly drives OrbitControls & Camera per Beat)
+// 1. CAMERA DIRECTOR (PC Mode Only — Never fights phone AR tracking)
 // ============================================================================
 function CameraDirector({
   cameraDirective,
   entityRefs,
   freeInspectMode,
+  isAR,
 }: {
   cameraDirective: any;
   entityRefs: React.MutableRefObject<Record<string, THREE.Group | null>>;
   freeInspectMode: boolean;
+  isAR: boolean;
 }) {
   const { camera, controls } = useThree();
-  const isAR = useXR((state) => state.mode === 'immersive-ar');
-
   const desiredTarget = useRef(new THREE.Vector3(0, 1.1, -1.0));
   const desiredCamPos = useRef(new THREE.Vector3(0, 1.35, -0.2));
   const isTransitioning = useRef(false);
@@ -92,13 +92,12 @@ function CameraDirector({
       focusObj.getWorldPosition(targetPos);
     }
 
-    // Ensure minimum comfortable camera distance so cuboids are framed clearly
     const rawOffset = cameraDirective.cameraOffsetMeters || {
       x: 0,
       y: 0.22,
       z: 0.65,
     };
-    const safeZ = Math.max(0.48, rawOffset.z || 0.6);
+    const safeZ = Math.max(0.55, rawOffset.z || 0.65);
     const safeY = rawOffset.y ?? 0.18;
 
     desiredTarget.current.copy(targetPos);
@@ -138,7 +137,7 @@ function CameraDirector({
 }
 
 // ============================================================================
-// 2. CUBOID PROXY ENTITY (Replaces .glb with articulated, macro-aware cuboid)
+// 2. CUBOID PROXY ENTITY (100% Native WebGL — Zero Frustum Culling or HTML Bugs)
 // ============================================================================
 function CuboidProxyEntity({
   entity,
@@ -169,7 +168,6 @@ function CuboidProxyEntity({
     return () => registerRef(entity.instanceId, null);
   }, [entity.instanceId, registerRef]);
 
-  // Macros targeting this specific entity
   const myMacros = useMemo(
     () =>
       activeMacros.filter((m) => m.targetInstanceId === entity.instanceId),
@@ -191,13 +189,11 @@ function CuboidProxyEntity({
     (m) => m.macroType === 'FLOW_PARTICLES_BETWEEN'
   );
 
-  // Check if user interaction gate drives this entity
   const isDrivenByGate =
     interactionGate &&
     (interactionGate.targetInstanceId === entity.instanceId ||
       interactionGate.sourceToolOrInstanceId === entity.instanceId);
 
-  // Compute mapped output from user slider [inputMin..inputMax] -> [outputMin..outputMax]
   const mappedGateOutput = useMemo(() => {
     if (!interactionGate) return 0;
     const {
@@ -214,7 +210,6 @@ function CuboidProxyEntity({
     return outputRangeMin + norm * (outputRangeMax - outputRangeMin);
   }, [interactionGate, sliderValue]);
 
-  // Smooth 60fps transform & macro animation loop
   useFrame((state, delta) => {
     if (!groupRef.current || !placement) return;
 
@@ -237,13 +232,11 @@ function CuboidProxyEntity({
       if (prop === 'scale.uniform') uniformScale = mappedGateOutput;
     }
 
-    // Smooth Position Lerp
     groupRef.current.position.lerp(
       new THREE.Vector3(targetX, targetY, targetZ),
       Math.min(1, delta * 6)
     );
 
-    // Smooth Rotation Lerp
     const targetQuat = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(
         THREE.MathUtils.degToRad(baseRot.x || 0),
@@ -253,7 +246,6 @@ function CuboidProxyEntity({
     );
     groupRef.current.quaternion.slerp(targetQuat, Math.min(1, delta * 6));
 
-    // Smooth Scale Lerp
     const pulse = hasShaderMorph
       ? 1 + Math.sin(state.clock.elapsedTime * 4) * 0.06
       : 1;
@@ -263,7 +255,6 @@ function CuboidProxyEntity({
       Math.min(1, delta * 6)
     );
 
-    // Rotate Callout Ring
     if (ringRef.current) {
       ringRef.current.rotation.z += delta * 1.5;
     }
@@ -275,14 +266,15 @@ function CuboidProxyEntity({
     isDrivenByGate && interactionGate.drivenProperty === 'material.opacity'
       ? mappedGateOutput
       : hasXray
-      ? 0.25
-      : 0.88;
+      ? 0.28
+      : 0.92;
 
   const activeMacroInfo = myMacros[myMacros.length - 1];
 
   return (
     <group
       ref={groupRef}
+      frustumCulled={false}
       position={[
         placement.solvedTransform.position.x,
         placement.solvedTransform.position.y,
@@ -298,36 +290,41 @@ function CuboidProxyEntity({
       }}
       onPointerOut={() => setHovered(false)}
     >
-      {/* OUTER CUBOID PROXY */}
-      <RoundedBox args={style.size} radius={0.012} smoothness={4} castShadow>
+      {/* OUTER CUBOID PROXY (frustumCulled={false} prevents mobile AR vanishing!) */}
+      <RoundedBox
+        args={style.size}
+        radius={0.012}
+        smoothness={4}
+        frustumCulled={false}
+      >
         <meshStandardMaterial
           color={hasShaderMorph ? '#38bdf8' : style.color}
-          emissive={
-            hovered || myMacros.length > 0 ? '#38bdf8' : '#000000'
-          }
+          emissive={hovered || myMacros.length > 0 ? '#38bdf8' : '#000000'}
           emissiveIntensity={hovered ? 0.5 : myMacros.length > 0 ? 0.35 : 0}
-          transparent
+          transparent={baseOpacity < 0.99}
           opacity={baseOpacity}
+          depthWrite={baseOpacity > 0.5}
           roughness={0.25}
-          metalness={0.3}
+          metalness={0.25}
         />
       </RoundedBox>
 
-      {/* INNER CORE SUB-NODE CUBOID (Visible during XRAY_ISOLATE) */}
-      <mesh scale={[0.5, 0.5, 0.5]}>
+      {/* INNER CORE SUB-NODE CUBOID */}
+      <mesh scale={[0.52, 0.52, 0.52]} frustumCulled={false}>
         <boxGeometry args={style.size} />
         <meshStandardMaterial
           color="#38bdf8"
           emissive="#38bdf8"
-          emissiveIntensity={hasXray ? 0.85 : 0.2}
+          emissiveIntensity={hasXray ? 0.85 : 0.25}
           wireframe={!hasXray}
         />
       </mesh>
 
-      {/* SEMANTIC SOCKETS (Small Cyan Spheres from entity.sockets) */}
+      {/* SEMANTIC SOCKETS */}
       {(entity.sockets || []).map((sock: any, idx: number) => (
         <mesh
           key={sock.socketName || idx}
+          frustumCulled={false}
           position={[
             sock.localOffsetMeters?.x || 0,
             sock.localOffsetMeters?.y || 0,
@@ -341,25 +338,25 @@ function CuboidProxyEntity({
 
       {/* HOLOGRAM MACRO: ANNOTATION CALLOUT RING */}
       {(hasCallout || hasFlowParticles) && (
-        <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.09, 0.105, 32]} />
+        <mesh ref={ringRef} rotation={[Math.PI / 2, 0, 0]} frustumCulled={false}>
+          <ringGeometry args={[0.09, 0.108, 32]} />
           <meshBasicMaterial
             color="#38bdf8"
             side={THREE.DoubleSide}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
         </mesh>
       )}
 
-      {/* FLOATING 3D CUBOID LABEL */}
+      {/* FLOATING 3D CUBOID TITLE */}
       <Text
         position={[0, style.size[1] / 2 + 0.045, 0]}
         fontSize={0.022}
-        color="#f5f5f4"
+        color="#ffffff"
         anchorX="center"
         anchorY="bottom"
-        outlineWidth={0.002}
+        outlineWidth={0.0025}
         outlineColor="#0c0a09"
       >
         {formatEntityLabel(entity.instanceId)}
@@ -376,37 +373,50 @@ function CuboidProxyEntity({
         {`[${placement.zone}]`}
       </Text>
 
-      {/* ACTIVE HOLOGRAM MACRO TELEMETRY CALLOUT BADGE */}
+      {/* NATIVE 3D HOLOGRAM TELEMETRY BADGE (Works in Mobile AR & Vision Pro!) */}
       {activeMacroInfo && (
-        <Html
-          position={[0, -style.size[1] / 2 - 0.05, 0]}
-          center
-          distanceFactor={1.5}
-        >
-          <div className="px-2.5 py-1 rounded-md bg-stone-950/90 border border-sky-400/60 text-sky-300 text-[10px] font-mono whitespace-nowrap shadow-lg backdrop-blur-md">
-            <span className="font-bold text-white">
-              {activeMacroInfo.params?.calloutLabel ||
-                activeMacroInfo.macroType}
-            </span>
-            {activeMacroInfo.params?.telemetryValue && (
-              <span className="ml-1.5 text-emerald-400">
-                • {activeMacroInfo.params.telemetryValue}
-              </span>
-            )}
-            {activeMacroInfo.targetNodeName && (
-              <div className="text-[9px] text-stone-400">
-                Node: {activeMacroInfo.targetNodeName}
-              </div>
-            )}
-          </div>
-        </Html>
+        <group position={[0, -style.size[1] / 2 - 0.055, 0.04]}>
+          <RoundedBox args={[0.26, 0.055, 0.006]} radius={0.008} frustumCulled={false}>
+            <meshStandardMaterial
+              color="#0c0a09"
+              emissive="#0ea5e9"
+              emissiveIntensity={0.2}
+              transparent
+              opacity={0.92}
+            />
+          </RoundedBox>
+          <Text
+            position={[0, 0.008, 0.005]}
+            fontSize={0.014}
+            color="#38bdf8"
+            anchorX="center"
+            anchorY="middle"
+            maxWidth={0.24}
+          >
+            {`${
+              activeMacroInfo.params?.calloutLabel || activeMacroInfo.macroType
+            }`}
+          </Text>
+          <Text
+            position={[0, -0.011, 0.005]}
+            fontSize={0.011}
+            color="#34d399"
+            anchorX="center"
+            anchorY="middle"
+            maxWidth={0.24}
+          >
+            {activeMacroInfo.params?.telemetryValue ||
+              activeMacroInfo.targetNodeName ||
+              'Active'}
+          </Text>
+        </group>
       )}
     </group>
   );
 }
 
 // ============================================================================
-// 3. MANIM 3D GEOMETRIC OVERLAY (Vertices, Similar Triangles, Angle Arcs)
+// 3. MANIM 3D GEOMETRIC OVERLAY
 // ============================================================================
 function ManimGeometricOverlay3D({
   manimOverlay,
@@ -417,7 +427,6 @@ function ManimGeometricOverlay3D({
 }) {
   if (!manimOverlay || !manimOverlay.enabled) return null;
 
-  // Center the Manim coordinate system around the Optical Bench (y = 1.0, z = -0.95)
   const originOffset = new THREE.Vector3(0, 1.02, -0.92);
 
   const vertexMap = new Map<string, THREE.Vector3>();
@@ -435,35 +444,35 @@ function ManimGeometricOverlay3D({
   const verticesList = Array.from(vertexMap.entries());
 
   return (
-    <group>
-      {/* PRINCIPAL OPTICAL AXIS REFERENCE LINE */}
+    <group frustumCulled={false}>
       <Line
         points={[
           [-0.75, originOffset.y, originOffset.z],
           [0.75, originOffset.y, originOffset.z],
         ]}
         color="#10b981"
-        lineWidth={1.5}
+        lineWidth={2}
         dashed
         dashSize={0.03}
         gapSize={0.02}
       />
 
-      {/* MANIM 3D VERTEX DOTS & LABELS */}
       {(manimOverlay.vertices || []).map((v: any) => {
         const pos = vertexMap.get(v.id)!;
         return (
-          <group key={v.id} position={pos}>
-            <mesh>
-              <sphereGeometry args={[0.012, 16, 16]} />
+          <group key={v.id} position={pos} frustumCulled={false}>
+            <mesh frustumCulled={false}>
+              <sphereGeometry args={[0.014, 16, 16]} />
               <meshBasicMaterial color="#38bdf8" />
             </mesh>
             <Text
-              position={[0, 0.03, 0]}
+              position={[0, 0.032, 0]}
               fontSize={0.02}
               color="#38bdf8"
               anchorX="center"
               anchorY="bottom"
+              outlineWidth={0.002}
+              outlineColor="#000000"
             >
               {v.label}
             </Text>
@@ -471,7 +480,6 @@ function ManimGeometricOverlay3D({
         );
       })}
 
-      {/* CONNECTING RAYS BETWEEN VERTICES */}
       {verticesList.length >= 2 && (
         <Line
           points={verticesList.map(([, vec]) => [vec.x, vec.y, vec.z])}
@@ -480,7 +488,6 @@ function ManimGeometricOverlay3D({
         />
       )}
 
-      {/* HIGHLIGHTED SIMILAR TRIANGLES / POLYGONS */}
       {(manimOverlay.highlightedPolygons || []).map((poly: any) => {
         const isTriggered =
           !poly.triggerOnSyncMarker ||
@@ -502,11 +509,11 @@ function ManimGeometricOverlay3D({
         geom.computeVertexNormals();
 
         return (
-          <mesh key={poly.polygonId} geometry={geom}>
+          <mesh key={poly.polygonId} geometry={geom} frustumCulled={false}>
             <meshBasicMaterial
               color={poly.fillColorHex || '#38bdf8'}
               transparent
-              opacity={poly.opacity ?? 0.28}
+              opacity={poly.opacity ?? 0.3}
               side={THREE.DoubleSide}
             />
           </mesh>
@@ -517,154 +524,305 @@ function ManimGeometricOverlay3D({
 }
 
 // ============================================================================
-// 4. MAIN EXPORTED R3F COMPONENT (Plugs into SimulationRouter & KapikitabAREnvironment)
+// 4. APPLE VISION PRO 3D SPATIAL GLASS CONSOLE (Interactive in Mobile AR!)
 // ============================================================================
-export default function HumanEyeChapter10Lab({
-  isFullscreen = false,
+function Spatial3DButton({
+  position,
+  size = [0.16, 0.055, 0.012],
+  label,
+  active = false,
+  accentColor = '#10b981',
+  onClick,
 }: {
-  modelUrl?: string;
-  isFullscreen?: boolean;
-  title?: string;
+  position: [number, number, number];
+  size?: [number, number, number];
+  label: string;
+  active?: boolean;
+  accentColor?: string;
+  onClick: () => void;
 }) {
-  const modules = sceneGraphData.modules || [];
-  const allBeats = useMemo(
-    () => modules.flatMap((m: any) => m.beats || []),
-    [modules]
+  const [hovered, setHovered] = useState(false);
+  return (
+    <group
+      position={position}
+      frustumCulled={false}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+    >
+      <RoundedBox args={size} radius={0.012} smoothness={4} frustumCulled={false}>
+        <meshStandardMaterial
+          color={active ? accentColor : hovered ? '#292524' : '#1c1917'}
+          emissive={active || hovered ? accentColor : '#000000'}
+          emissiveIntensity={active ? 0.35 : hovered ? 0.2 : 0}
+          roughness={0.2}
+          metalness={0.3}
+        />
+      </RoundedBox>
+      <Text
+        position={[0, 0, size[2] / 2 + 0.003]}
+        fontSize={0.018}
+        color={active ? '#0c0a09' : '#f5f5f4'}
+        anchorX="center"
+        anchorY="middle"
+        maxWidth={size[0] - 0.02}
+      >
+        {label}
+      </Text>
+    </group>
   );
-  const entities = sceneGraphData.entities || [];
+}
 
-  // Playback & Navigation State
-  const [currentBeatIdx, setCurrentBeatIdx] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [elapsedMs, setElapsedMs] = useState(0);
-  const [freeInspectMode, setFreeInspectMode] = useState(false);
+function SpatialVisionProConsole3D({
+  currentBeat,
+  currentBeatIdx,
+  totalBeats,
+  isPlaying,
+  setIsPlaying,
+  onPrevBeat,
+  onNextBeat,
+  unlockedSyncMarkers,
+  onTriggerSyncIndex,
+  sliderValue,
+  onStepSlider,
+  gateCompleted,
+}: {
+  currentBeat: any;
+  currentBeatIdx: number;
+  totalBeats: number;
+  isPlaying: boolean;
+  setIsPlaying: React.Dispatch<React.SetStateAction<boolean>>;
+  onPrevBeat: () => void;
+  onNextBeat: () => void;
+  unlockedSyncMarkers: string[];
+  onTriggerSyncIndex: (idx: number) => void;
+  sliderValue: number;
+  onStepSlider: (delta: number) => void;
+  gateCompleted: boolean;
+}) {
+  const arContext = useARAnchor();
 
-  // Interactive Physics Slider & Step State
-  const [sliderValue, setSliderValue] = useState(0);
-  const [activeStepIdx, setActiveStepIdx] = useState(0);
-  const [gateCompleted, setGateCompleted] = useState(false);
-  const [showDiveDeeper, setShowDiveDeeper] = useState(false);
-
-  // Registry of 3D Group Refs by instanceId for the CameraDirector
-  const entityRefs = useRef<Record<string, THREE.Group | null>>({});
-  const registerEntityRef = (id: string, ref: THREE.Group | null) => {
-    entityRefs.current[id] = ref;
-  };
-
-  const currentBeat = allBeats[currentBeatIdx] || allBeats[0];
-  const currentModule = modules.find(
-    (m: any) => m.moduleId === currentBeat?.moduleId
-  );
-
-  // Reset per-beat state when switching beats
-  useEffect(() => {
-    if (!currentBeat) return;
-    setElapsedMs(0);
-    setGateCompleted(false);
-    setActiveStepIdx(0);
-    setFreeInspectMode(false);
-
-    const gate = currentBeat.interactionGate;
-    if (gate) {
-      const mid =
-        ((gate.inputRangeMin ?? 0) + (gate.inputRangeMax ?? 1)) / 2;
-      setSliderValue(mid);
-    }
-  }, [currentBeatIdx, currentBeat]);
-
-  // Word-Sync Timeline Clock
-  useEffect(() => {
-    if (!isPlaying || !currentBeat) return;
-    const interval = setInterval(() => {
-      setElapsedMs((prev) => {
-        const next = prev + 100;
-        if (next >= (currentBeat.durationMs || 18000)) {
-          setIsPlaying(false);
-          return currentBeat.durationMs || 18000;
-        }
-        return next;
-      });
-    }, 100);
-    return () => clearInterval(interval);
-  }, [isPlaying, currentBeat]);
-
-  // Determine which [SYNC:anchor_X] markers have been reached based on elapsed time
-  const unlockedSyncMarkers = useMemo(() => {
-    if (!currentBeat) return ['anchor_1'];
-    const segments = currentBeat.narrationSegments || [];
-    const duration = currentBeat.durationMs || 18000;
-    const unlocked: string[] = [];
-
-    segments.forEach((seg: any, idx: number) => {
-      const triggerTime = (idx / Math.max(1, segments.length)) * duration * 0.75;
-      if (elapsedMs >= triggerTime) {
-        unlocked.push(seg.syncMarker);
-      }
-    });
-
-    return unlocked.length > 0 ? unlocked : ['anchor_1'];
-  }, [currentBeat, elapsedMs]);
-
-  // Active Hologram Macros for unlocked sync markers
-  const activeMacros = useMemo(() => {
-    if (!currentBeat) return [];
-    return (currentBeat.wordSyncedHologramMacros || []).filter((m: any) =>
-      unlockedSyncMarkers.includes(m.syncMarker)
-    );
+  // Current active spoken sentence
+  const activeSpokenSegment = useMemo(() => {
+    const segs = currentBeat?.narrationSegments || [];
+    if (segs.length === 0) return currentBeat?.narrationText || '';
+    const lastSync = unlockedSyncMarkers[unlockedSyncMarkers.length - 1];
+    const found = segs.find((s: any) => s.syncMarker === lastSync);
+    return found ? found.spokenText : segs[0].spokenText;
   }, [currentBeat, unlockedSyncMarkers]);
 
-  // Map placements by instanceId for O(1) lookup
-  const placementByInstanceId = useMemo(() => {
-    const map: Record<string, any> = {};
-    (currentBeat?.entityPlacements || []).forEach((p: any) => {
-      map[p.instanceId] = p;
-    });
-    return map;
-  }, [currentBeat]);
-
-  // Handle Tap-to-Inspect or Slider Change
-  const handleEntityTap = (instanceId: string) => {
-    setGateCompleted(true);
-    setActiveStepIdx((prev) =>
-      Math.min(
-        (currentBeat?.interactionStateMachine?.length || 1) - 1,
-        prev + 1
-      )
-    );
-  };
-
-  const handleSliderChange = (val: number) => {
-    setSliderValue(val);
-    const target = currentBeat?.interactionGate?.successTargetValue ?? 0.5;
-    const range =
-      Math.abs(
-        (currentBeat?.interactionGate?.inputRangeMax ?? 1) -
-          (currentBeat?.interactionGate?.inputRangeMin ?? 0)
-      ) || 1;
-    if (Math.abs(val - target) <= range * 0.25) {
-      setGateCompleted(true);
-    }
-  };
+  const formulaLatex =
+    currentBeat?.manimOverlay?.katexFormulaSteps?.[0]?.latex ||
+    currentBeat?.continuousPhysicsBindings?.[0]?.mathematicalFormula ||
+    null;
 
   return (
-    <div className="relative w-full h-full min-h-[640px] bg-stone-950 text-stone-100 overflow-hidden select-none font-sans">
-      {/* ====================================================================
-          3D SPATIAL CANVAS (WRAPPED IN YOUR KAPIKITAB AR ENVIRONMENT)
-      ==================================================================== */}
-      <KapikitabAREnvironment>
-        <CameraDirector
-          cameraDirective={currentBeat?.cameraDirective}
-          entityRefs={entityRefs}
-          freeInspectMode={freeInspectMode}
+    // Positioned right in front of the tabletop bench, angled 25 deg toward the user
+    <group position={[0, 0.14, 0.44]} rotation={[-0.38, 0, 0]} frustumCulled={false}>
+      {/* FROSTED SPATIAL GLASS BACKPLATE */}
+      <RoundedBox args={[1.15, 0.44, 0.015]} radius={0.025} smoothness={4} frustumCulled={false}>
+        <meshStandardMaterial
+          color="#0c0a09"
+          roughness={0.15}
+          metalness={0.4}
+          transparent
+          opacity={0.88}
         />
+      </RoundedBox>
 
-        {/* OPTICAL BENCH WORKSURFACE REFERENCE */}
-        <mesh position={[0, 0.88, -1.0]} receiveShadow>
-          <boxGeometry args={[1.8, 0.03, 0.65]} />
+      {/* HEADER: BEAT NUMBER & CONCEPT TITLE */}
+      <Text
+        position={[0, 0.17, 0.012]}
+        fontSize={0.024}
+        color="#34d399"
+        anchorX="center"
+        anchorY="middle"
+        maxWidth={1.05}
+      >
+        {`BEAT ${currentBeatIdx + 1}/${totalBeats}: ${
+          currentBeat?.conceptTitle || ''
+        }`}
+      </Text>
+
+      {/* SPOKEN NARRATION SUBTITLE READOUT */}
+      <Text
+        position={[0, 0.095, 0.012]}
+        fontSize={0.019}
+        color="#f5f5f4"
+        anchorX="center"
+        anchorY="middle"
+        textAlign="center"
+        maxWidth={1.04}
+      >
+        {activeSpokenSegment}
+      </Text>
+
+      {/* LIVE EQUATION / TELEMETRY BAR */}
+      {formulaLatex && (
+        <Text
+          position={[0, 0.025, 0.012]}
+          fontSize={0.018}
+          color="#38bdf8"
+          anchorX="center"
+          anchorY="middle"
+          maxWidth={1.0}
+        >
+          {`Formula: ${formulaLatex}`}
+        </Text>
+      )}
+
+      {/* ROW 1: PLAYBACK & SYNC ANCHOR BUTTONS */}
+      <Spatial3DButton
+        position={[-0.44, -0.055, 0.012]}
+        size={[0.15, 0.052, 0.012]}
+        label="<< Prev"
+        onClick={onPrevBeat}
+      />
+      <Spatial3DButton
+        position={[-0.25, -0.055, 0.012]}
+        size={[0.18, 0.052, 0.012]}
+        label={isPlaying ? 'PAUSE' : 'PLAY'}
+        active={isPlaying}
+        onClick={() => setIsPlaying((p) => !p)}
+      />
+      <Spatial3DButton
+        position={[-0.06, -0.055, 0.012]}
+        size={[0.15, 0.052, 0.012]}
+        label="Next >>"
+        onClick={onNextBeat}
+      />
+
+      {/* SYNC ANCHOR DIRECT TRIGGERS */}
+      {(currentBeat?.narrationSegments || []).map((seg: any, idx: number) => (
+        <Spatial3DButton
+          key={seg.segmentId}
+          position={[0.14 + idx * 0.14, -0.055, 0.012]}
+          size={[0.12, 0.052, 0.012]}
+          label={seg.syncMarker.replace('anchor_', 'Sync ')}
+          active={unlockedSyncMarkers.includes(seg.syncMarker)}
+          accentColor="#38bdf8"
+          onClick={() => onTriggerSyncIndex(idx)}
+        />
+      ))}
+
+      {/* ROW 2: INTERACTIVE GATE PARAMETER STEPPERS & AR TABLE CONTROLS */}
+      <Spatial3DButton
+        position={[-0.44, -0.145, 0.012]}
+        size={[0.14, 0.052, 0.012]}
+        label="Param [-]"
+        accentColor="#38bdf8"
+        onClick={() => onStepSlider(-0.15)}
+      />
+      <Text
+        position={[-0.23, -0.145, 0.012]}
+        fontSize={0.017}
+        color={gateCompleted ? '#34d399' : '#e7e5e4'}
+        anchorX="center"
+        anchorY="middle"
+        maxWidth={0.25}
+      >
+        {`${currentBeat?.interactionGate?.drivenProperty || 'Value'}: ${sliderValue.toFixed(
+          2
+        )}`}
+      </Text>
+      <Spatial3DButton
+        position={[-0.02, -0.145, 0.012]}
+        size={[0.14, 0.052, 0.012]}
+        label="Param [+]"
+        accentColor="#38bdf8"
+        onClick={() => onStepSlider(0.15)}
+      />
+
+      {/* AR SCALE & RE-ANCHOR CONTROLS */}
+      {arContext?.isAR && (
+        <>
+          <Spatial3DButton
+            position={[0.16, -0.145, 0.012]}
+            size={[0.13, 0.052, 0.012]}
+            label="Scale -"
+            onClick={() =>
+              arContext.setArScale((s) => Math.max(0.3, s - 0.12))
+            }
+          />
+          <Spatial3DButton
+            position={[0.31, -0.145, 0.012]}
+            size={[0.13, 0.052, 0.012]}
+            label="Scale +"
+            onClick={() =>
+              arContext.setArScale((s) => Math.min(1.4, s + 0.12))
+            }
+          />
+          <Spatial3DButton
+            position={[0.47, -0.145, 0.012]}
+            size={[0.15, 0.052, 0.012]}
+            label="Move Lab"
+            accentColor="#f59e0b"
+            onClick={() => arContext.resetAnchor()}
+          />
+        </>
+      )}
+    </group>
+  );
+}
+
+// ============================================================================
+// 5. INTERNAL SCENE STAGE (Normalizes JSON Standing Coords to Tabletop Origin)
+// ============================================================================
+function NormalizedSpatialStage({
+  entities,
+  placementByInstanceId,
+  activeMacros,
+  currentBeat,
+   currentBeatIdx,
+  totalBeats,
+  isPlaying,
+  setIsPlaying,
+  onPrevBeat,
+  onNextBeat,
+  unlockedSyncMarkers,
+  onTriggerSyncIndex,
+  sliderValue,
+  onStepSlider,
+  gateCompleted,
+  handleEntityTap,
+  entityRefs,
+  registerEntityRef,
+  freeInspectMode,
+}: any) {
+  const arContext = useARAnchor();
+  const isAR = Boolean(arContext?.isAR);
+
+  // CRITICAL AR FIX:
+  // In JSON, the workbench is at [0, 0.88, -1.0] and cuboids are at y=1.0..1.48, z=-1.0.
+  // In AR, shifting by [0, -0.88, +1.0] places the workbench and cuboids directly on the user's desk!
+  const stageOffset: [number, number, number] = isAR
+    ? [0, -0.88, 1.0]
+    : [0, 0, 0];
+
+  return (
+    <group frustumCulled={false}>
+      <CameraDirector
+        cameraDirective={currentBeat?.cameraDirective}
+        entityRefs={entityRefs}
+        freeInspectMode={freeInspectMode}
+        isAR={isAR}
+      />
+
+      {/* NORMALIZED WORKBENCH & ENTITIES GROUP */}
+      <group position={stageOffset} frustumCulled={false}>
+        {/* OPTICAL BENCH WORKSURFACE */}
+        <mesh position={[0, 0.88, -1.0]} frustumCulled={false}>
+          <boxGeometry args={[1.65, 0.025, 0.6]} />
           <meshStandardMaterial
             color="#1c1917"
-            roughness={0.8}
-            metalness={0.2}
+            roughness={0.7}
+            metalness={0.3}
           />
         </mesh>
 
@@ -687,10 +845,189 @@ export default function HumanEyeChapter10Lab({
           manimOverlay={currentBeat?.manimOverlay}
           unlockedSyncMarkers={unlockedSyncMarkers}
         />
+      </group>
+
+      {/* APPLE VISION PRO 3D SPATIAL CONSOLE (Always available in AR!) */}
+      {isAR && (
+        <SpatialVisionProConsole3D
+          currentBeat={currentBeat}
+          currentBeatIdx={currentBeatIdx}
+          totalBeats={totalBeats}
+          isPlaying={isPlaying}
+          setIsPlaying={setIsPlaying}
+          onPrevBeat={onPrevBeat}
+          onNextBeat={onNextBeat}
+          unlockedSyncMarkers={unlockedSyncMarkers}
+          onTriggerSyncIndex={onTriggerSyncIndex}
+          sliderValue={sliderValue}
+          onStepSlider={onStepSlider}
+          gateCompleted={gateCompleted}
+        />
+      )}
+    </group>
+  );
+}
+
+// ============================================================================
+// 6. MAIN EXPORTED R3F COMPONENT
+// ============================================================================
+export default function HumanEyeChapter10Lab({
+  isFullscreen = false,
+}: {
+  modelUrl?: string;
+  isFullscreen?: boolean;
+  title?: string;
+}) {
+  const modules = sceneGraphData.modules || [];
+  const allBeats = useMemo(
+    () => modules.flatMap((m: any) => m.beats || []),
+    [modules]
+  );
+  const entities = sceneGraphData.entities || [];
+
+  const [currentBeatIdx, setCurrentBeatIdx] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [freeInspectMode, setFreeInspectMode] = useState(false);
+
+  const [sliderValue, setSliderValue] = useState(0);
+  const [gateCompleted, setGateCompleted] = useState(false);
+  const [showDiveDeeper, setShowDiveDeeper] = useState(false);
+
+  const entityRefs = useRef<Record<string, THREE.Group | null>>({});
+  const registerEntityRef = (id: string, ref: THREE.Group | null) => {
+    entityRefs.current[id] = ref;
+  };
+
+  const currentBeat = allBeats[currentBeatIdx] || allBeats[0];
+  const currentModule = modules.find(
+    (m: any) => m.moduleId === currentBeat?.moduleId
+  );
+
+  useEffect(() => {
+    if (!currentBeat) return;
+    setElapsedMs(0);
+    setGateCompleted(false);
+    setFreeInspectMode(false);
+
+    const gate = currentBeat.interactionGate;
+    if (gate) {
+      const mid =
+        ((gate.inputRangeMin ?? 0) + (gate.inputRangeMax ?? 1)) / 2;
+      setSliderValue(mid);
+    }
+  }, [currentBeatIdx, currentBeat]);
+
+  useEffect(() => {
+    if (!isPlaying || !currentBeat) return;
+    const interval = setInterval(() => {
+      setElapsedMs((prev) => {
+        const next = prev + 100;
+        if (next >= (currentBeat.durationMs || 18000)) {
+          setIsPlaying(false);
+          return currentBeat.durationMs || 18000;
+        }
+        return next;
+      });
+    }, 100);
+    return () => clearInterval(interval);
+  }, [isPlaying, currentBeat]);
+
+  const unlockedSyncMarkers = useMemo(() => {
+    if (!currentBeat) return ['anchor_1'];
+    const segments = currentBeat.narrationSegments || [];
+    const duration = currentBeat.durationMs || 18000;
+    const unlocked: string[] = [];
+
+    segments.forEach((seg: any, idx: number) => {
+      const triggerTime = (idx / Math.max(1, segments.length)) * duration * 0.75;
+      if (elapsedMs >= triggerTime) {
+        unlocked.push(seg.syncMarker);
+      }
+    });
+
+    return unlocked.length > 0 ? unlocked : ['anchor_1'];
+  }, [currentBeat, elapsedMs]);
+
+  const activeMacros = useMemo(() => {
+    if (!currentBeat) return [];
+    return (currentBeat.wordSyncedHologramMacros || []).filter((m: any) =>
+      unlockedSyncMarkers.includes(m.syncMarker)
+    );
+  }, [currentBeat, unlockedSyncMarkers]);
+
+  const placementByInstanceId = useMemo(() => {
+    const map: Record<string, any> = {};
+    (currentBeat?.entityPlacements || []).forEach((p: any) => {
+      map[p.instanceId] = p;
+    });
+    return map;
+  }, [currentBeat]);
+
+  const handleEntityTap = () => {
+    setGateCompleted(true);
+  };
+
+  const handleSliderChange = (val: number) => {
+    const min = currentBeat?.interactionGate?.inputRangeMin ?? 0;
+    const max = currentBeat?.interactionGate?.inputRangeMax ?? 1;
+    const clamped = Math.max(min, Math.min(max, val));
+    setSliderValue(clamped);
+
+    const target = currentBeat?.interactionGate?.successTargetValue ?? 0.5;
+    const range = Math.abs(max - min) || 1;
+    if (Math.abs(clamped - target) <= range * 0.25) {
+      setGateCompleted(true);
+    }
+  };
+
+  const handleStepSlider = (fractionDelta: number) => {
+    const min = currentBeat?.interactionGate?.inputRangeMin ?? 0;
+    const max = currentBeat?.interactionGate?.inputRangeMax ?? 1;
+    const step = (max - min) * fractionDelta;
+    handleSliderChange(sliderValue + step);
+  };
+
+  return (
+    <div className="relative w-full h-full min-h-[640px] bg-stone-950 text-stone-100 overflow-hidden select-none font-sans">
+      {/* ====================================================================
+          3D SPATIAL CANVAS (PC + APPLE VISION PRO MOBILE AR PASSTHROUGH)
+      ==================================================================== */}
+      <KapikitabAREnvironment>
+        <NormalizedSpatialStage
+          entities={entities}
+          placementByInstanceId={placementByInstanceId}
+          activeMacros={activeMacros}
+          currentBeat={currentBeat}
+          currentBeatIdx={currentBeatIdx}
+          totalBeats={allBeats.length}
+          isPlaying={isPlaying}
+          setIsPlaying={setIsPlaying}
+          onPrevBeat={() => setCurrentBeatIdx((i) => Math.max(0, i - 1))}
+          onNextBeat={() =>
+            setCurrentBeatIdx((i) => Math.min(allBeats.length - 1, i + 1))
+          }
+          unlockedSyncMarkers={unlockedSyncMarkers}
+          onTriggerSyncIndex={(idx: number) => {
+            setIsPlaying(false);
+            const segs = currentBeat?.narrationSegments || [];
+            setElapsedMs(
+              ((idx + 0.1) / Math.max(1, segs.length)) *
+                (currentBeat?.durationMs || 18000)
+            );
+          }}
+          sliderValue={sliderValue}
+          onStepSlider={handleStepSlider}
+          gateCompleted={gateCompleted}
+          handleEntityTap={handleEntityTap}
+          entityRefs={entityRefs}
+          registerEntityRef={registerEntityRef}
+          freeInspectMode={freeInspectMode}
+        />
       </KapikitabAREnvironment>
 
       {/* ====================================================================
-          TOP LEFT HUD: MODULE & BEAT SELECTOR + PEDAGOGICAL MODE BADGE
+          2D DESKTOP / TABLET HUD OVERLAYS (For Non-AR Browser Testing)
       ==================================================================== */}
       <div className="absolute top-4 left-4 z-30 max-w-md bg-stone-900/85 backdrop-blur-md border border-stone-800 rounded-2xl p-3.5 shadow-2xl pointer-events-auto">
         <div className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-emerald-400 mb-1">
@@ -707,7 +1044,6 @@ export default function HumanEyeChapter10Lab({
           {currentBeat?.conceptTitle}
         </h2>
 
-        {/* Beat Pill Selector */}
         <div className="flex flex-wrap gap-1 mt-2.5">
           {allBeats.map((b: any, idx: number) => (
             <button
@@ -725,10 +1061,8 @@ export default function HumanEyeChapter10Lab({
         </div>
       </div>
 
-      {/* ====================================================================
-          RIGHT HUD: MANIM EQUATION & CONTINUOUS PHYSICS TELEMETRY PANEL
-      ==================================================================== */}
-      <div className="absolute top-20 right-4 z-30 w-80 bg-stone-900/85 backdrop-blur-md border border-stone-800 rounded-2xl p-3.5 shadow-2xl pointer-events-auto space-y-3">
+      {/* RIGHT HUD */}
+      <div className="hidden md:block absolute top-20 right-4 z-30 w-80 bg-stone-900/85 backdrop-blur-md border border-stone-800 rounded-2xl p-3.5 shadow-2xl pointer-events-auto space-y-3">
         <div className="flex items-center justify-between border-b border-stone-800 pb-2">
           <span className="text-[11px] font-mono uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
             <Sparkles size={13} />
@@ -747,7 +1081,6 @@ export default function HumanEyeChapter10Lab({
           </button>
         </div>
 
-        {/* KaTeX Formula Steps */}
         {currentBeat?.manimOverlay?.katexFormulaSteps?.length > 0 ? (
           <div className="space-y-2">
             {currentBeat.manimOverlay.katexFormulaSteps.map((step: any) => (
@@ -766,12 +1099,10 @@ export default function HumanEyeChapter10Lab({
           </div>
         ) : (
           <div className="text-xs text-stone-400 italic">
-            Tactile Exploration Mode — No geometric proof overlay required for
-            this beat.
+            Tactile Exploration Mode — No geometric proof overlay required.
           </div>
         )}
 
-        {/* Continuous Physics Binding Formula */}
         {currentBeat?.continuousPhysicsBindings?.map((phys: any) => (
           <div
             key={phys.bindingId}
@@ -785,44 +1116,22 @@ export default function HumanEyeChapter10Lab({
             </div>
           </div>
         ))}
-
-        {/* Active Entities in Beat */}
-        <div>
-          <div className="text-[10px] font-mono uppercase text-stone-400 mb-1">
-            Active Cuboid Proxies ({currentBeat?.entityPlacements?.length || 0})
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {(currentBeat?.entityPlacements || []).map((pl: any) => (
-              <span
-                key={pl.instanceId}
-                className="px-2 py-0.5 rounded-md bg-stone-800 text-stone-200 text-[10px] font-mono"
-              >
-                {formatEntityLabel(pl.instanceId)}
-              </span>
-            ))}
-          </div>
-        </div>
       </div>
 
-      {/* ====================================================================
-          BOTTOM HUD: WORD-SYNCED NARRATION, INTERACTION GATE & CONTROLS
-      ==================================================================== */}
+      {/* BOTTOM HUD */}
       <div className="absolute bottom-4 left-4 right-4 z-30 flex flex-col md:flex-row gap-3 items-stretch pointer-events-auto">
-        {/* LEFT CARD: Word-Synced Voiceover Script & Sync Anchors */}
         <div className="flex-1 bg-stone-900/90 backdrop-blur-md border border-stone-800 rounded-2xl p-4 shadow-2xl flex flex-col justify-between">
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-[11px] font-mono text-stone-400">
               <span>WORD-SYNCED NARRATION SEGMENTS</span>
               <div className="flex gap-1.5">
-                {(currentBeat?.narrationSegments || []).map((seg: any) => {
+                {(currentBeat?.narrationSegments || []).map((seg: any, idx: number) => {
                   const active = unlockedSyncMarkers.includes(seg.syncMarker);
                   return (
                     <button
                       key={seg.segmentId}
                       onClick={() => {
                         setIsPlaying(false);
-                        const idx =
-                          currentBeat.narrationSegments.indexOf(seg);
                         setElapsedMs(
                           ((idx + 0.1) /
                             currentBeat.narrationSegments.length) *
@@ -842,7 +1151,6 @@ export default function HumanEyeChapter10Lab({
               </div>
             </div>
 
-            {/* Spoken Segments */}
             <div className="space-y-1 text-xs leading-relaxed">
               {(currentBeat?.narrationSegments || []).map((seg: any) => {
                 const isUnlocked = unlockedSyncMarkers.includes(
@@ -865,12 +1173,9 @@ export default function HumanEyeChapter10Lab({
             </div>
           </div>
 
-          {/* Transport Bar */}
           <div className="flex items-center gap-3 mt-3 pt-2.5 border-t border-stone-800">
             <button
-              onClick={() =>
-                setCurrentBeatIdx((i) => Math.max(0, i - 1))
-              }
+              onClick={() => setCurrentBeatIdx((i) => Math.max(0, i - 1))}
               disabled={currentBeatIdx === 0}
               className="p-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 disabled:opacity-40"
             >
@@ -893,7 +1198,6 @@ export default function HumanEyeChapter10Lab({
               <RotateCcw size={14} />
             </button>
 
-            {/* Progress Bar */}
             <div className="flex-1 h-1.5 bg-stone-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-emerald-400 transition-all duration-150"
@@ -921,7 +1225,6 @@ export default function HumanEyeChapter10Lab({
           </div>
         </div>
 
-        {/* RIGHT CARD: Interactive Gate Slider / Experiment Controls */}
         {currentBeat?.interactionGate && (
           <div className="w-full md:w-96 bg-stone-900/90 backdrop-blur-md border border-stone-800 rounded-2xl p-4 shadow-2xl flex flex-col justify-between">
             <div>
@@ -941,7 +1244,6 @@ export default function HumanEyeChapter10Lab({
                 {currentBeat.interactionGate.promptText}
               </p>
 
-              {/* Continuous Slider Control */}
               <div className="mt-3 space-y-1">
                 <div className="flex justify-between text-[10px] font-mono text-stone-400">
                   <span>
@@ -969,7 +1271,6 @@ export default function HumanEyeChapter10Lab({
               </div>
             </div>
 
-            {/* Dive Deeper Curiosity Questions Toggle */}
             {currentBeat?.learnerCheckpoint?.suggestedDiveDeeperQuestions
               ?.length > 0 && (
               <div className="mt-2 pt-2 border-t border-stone-800">
