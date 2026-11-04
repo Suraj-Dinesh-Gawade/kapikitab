@@ -47,6 +47,8 @@ const spatialEngineRegistry: Record<string, React.ComponentType<any>> = {
   'ChemistryTestLab': dynamic(() => import('./spatial-engine/labs/ChemistryTestLab'), { ssr: false, loading: LoadingState }),
   'WindTunnelLab': dynamic(() => import('./spatial-engine/labs/WindTunnelLab'), { ssr: false, loading: LoadingState }),
   'CollisionLab': dynamic(() => import('./spatial-engine/labs/CollisionLab'), { ssr: false, loading: LoadingState }),
+// NEW: Class 10 Human Eye & Colourful World Cuboid Proxy Lab
+  'HumanEyeChapter10Lab': dynamic(() => import('./spatial-engine/labs/HumanEyeChapter10Lab'), { ssr: false, loading: LoadingState }),
 };
 
 // ==================================================================
