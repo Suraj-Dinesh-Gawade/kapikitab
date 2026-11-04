@@ -607,6 +607,7 @@ function SpatialVisionProConsole3D({
   gateCompleted: boolean;
 }) {
   const arContext = useARAnchor();
+  const [hudHidden, setHudHidden] = useState(false);
 
   // Current active spoken sentence
   const activeSpokenSegment = useMemo(() => {
@@ -620,151 +621,284 @@ function SpatialVisionProConsole3D({
   const formulaLatex =
     currentBeat?.manimOverlay?.katexFormulaSteps?.[0]?.latex ||
     currentBeat?.continuousPhysicsBindings?.[0]?.mathematicalFormula ||
-    null;
+    'Interactive Spatial Mode';
 
   return (
-    // Positioned right in front of the tabletop bench, angled 25 deg toward the user
-    <group position={[0, 0.14, 0.44]} rotation={[-0.38, 0, 0]} frustumCulled={false}>
-      {/* FROSTED SPATIAL GLASS BACKPLATE */}
-      <RoundedBox args={[1.15, 0.44, 0.015]} radius={0.025} smoothness={4} frustumCulled={false}>
-        <meshStandardMaterial
-          color="#0c0a09"
-          roughness={0.15}
-          metalness={0.4}
-          transparent
-          opacity={0.88}
-        />
-      </RoundedBox>
-
-      {/* HEADER: BEAT NUMBER & CONCEPT TITLE */}
-      <Text
-        position={[0, 0.17, 0.012]}
-        fontSize={0.024}
-        color="#34d399"
-        anchorX="center"
-        anchorY="middle"
-        maxWidth={1.05}
+    <group frustumCulled={false}>
+      {/* ====================================================================
+          ZONE 3: ULTRA-LOW FRONT-LIP MICRO DOCK (Below table level: y = -0.04)
+          Never blocks any cuboid or ray, lets you toggle UI or step beats fast
+      ==================================================================== */}
+      <group
+        position={[0, -0.045, 0.36]}
+        rotation={[-0.45, 0, 0]}
+        frustumCulled={false}
       >
-        {`BEAT ${currentBeatIdx + 1}/${totalBeats}: ${
-          currentBeat?.conceptTitle || ''
-        }`}
-      </Text>
-
-      {/* SPOKEN NARRATION SUBTITLE READOUT */}
-      <Text
-        position={[0, 0.095, 0.012]}
-        fontSize={0.019}
-        color="#f5f5f4"
-        anchorX="center"
-        anchorY="middle"
-        textAlign="center"
-        maxWidth={1.04}
-      >
-        {activeSpokenSegment}
-      </Text>
-
-      {/* LIVE EQUATION / TELEMETRY BAR */}
-      {formulaLatex && (
-        <Text
-          position={[0, 0.025, 0.012]}
-          fontSize={0.018}
-          color="#38bdf8"
-          anchorX="center"
-          anchorY="middle"
-          maxWidth={1.0}
+        <RoundedBox
+          args={[0.76, 0.065, 0.012]}
+          radius={0.015}
+          smoothness={4}
+          frustumCulled={false}
         >
-          {`Formula: ${formulaLatex}`}
-        </Text>
-      )}
+          <meshStandardMaterial
+            color="#0c0a09"
+            roughness={0.2}
+            metalness={0.4}
+            transparent
+            opacity={0.9}
+          />
+        </RoundedBox>
 
-      {/* ROW 1: PLAYBACK & SYNC ANCHOR BUTTONS */}
-      <Spatial3DButton
-        position={[-0.44, -0.055, 0.012]}
-        size={[0.15, 0.052, 0.012]}
-        label="<< Prev"
-        onClick={onPrevBeat}
-      />
-      <Spatial3DButton
-        position={[-0.25, -0.055, 0.012]}
-        size={[0.18, 0.052, 0.012]}
-        label={isPlaying ? 'PAUSE' : 'PLAY'}
-        active={isPlaying}
-        onClick={() => setIsPlaying((p) => !p)}
-      />
-      <Spatial3DButton
-        position={[-0.06, -0.055, 0.012]}
-        size={[0.15, 0.052, 0.012]}
-        label="Next >>"
-        onClick={onNextBeat}
-      />
-
-      {/* SYNC ANCHOR DIRECT TRIGGERS */}
-      {(currentBeat?.narrationSegments || []).map((seg: any, idx: number) => (
         <Spatial3DButton
-          key={seg.segmentId}
-          position={[0.14 + idx * 0.14, -0.055, 0.012]}
-          size={[0.12, 0.052, 0.012]}
-          label={seg.syncMarker.replace('anchor_', 'Sync ')}
-          active={unlockedSyncMarkers.includes(seg.syncMarker)}
-          accentColor="#38bdf8"
-          onClick={() => onTriggerSyncIndex(idx)}
+          position={[-0.27, 0, 0.01]}
+          size={[0.14, 0.042, 0.01]}
+          label="<< Beat"
+          onClick={onPrevBeat}
         />
-      ))}
+        <Spatial3DButton
+          position={[-0.1, 0, 0.01]}
+          size={[0.15, 0.042, 0.01]}
+          label={isPlaying ? 'PAUSE' : 'PLAY'}
+          active={isPlaying}
+          onClick={() => setIsPlaying((p) => !p)}
+        />
+        <Spatial3DButton
+          position={[0.07, 0, 0.01]}
+          size={[0.14, 0.042, 0.01]}
+          label="Beat >>"
+          onClick={onNextBeat}
+        />
+        <Spatial3DButton
+          position={[0.25, 0, 0.01]}
+          size={[0.17, 0.042, 0.01]}
+          label={hudHidden ? 'Show Wings' : 'Clean View'}
+          active={hudHidden}
+          accentColor="#38bdf8"
+          onClick={() => setHudHidden((v) => !v)}
+        />
+      </group>
 
-      {/* ROW 2: INTERACTIVE GATE PARAMETER STEPPERS & AR TABLE CONTROLS */}
-      <Spatial3DButton
-        position={[-0.44, -0.145, 0.012]}
-        size={[0.14, 0.052, 0.012]}
-        label="Param [-]"
-        accentColor="#38bdf8"
-        onClick={() => onStepSlider(-0.15)}
-      />
-      <Text
-        position={[-0.23, -0.145, 0.012]}
-        fontSize={0.017}
-        color={gateCompleted ? '#34d399' : '#e7e5e4'}
-        anchorX="center"
-        anchorY="middle"
-        maxWidth={0.25}
-      >
-        {`${currentBeat?.interactionGate?.drivenProperty || 'Value'}: ${sliderValue.toFixed(
-          2
-        )}`}
-      </Text>
-      <Spatial3DButton
-        position={[-0.02, -0.145, 0.012]}
-        size={[0.14, 0.052, 0.012]}
-        label="Param [+]"
-        accentColor="#38bdf8"
-        onClick={() => onStepSlider(0.15)}
-      />
-
-      {/* AR SCALE & RE-ANCHOR CONTROLS */}
-      {arContext?.isAR && (
+      {!hudHidden && (
         <>
-          <Spatial3DButton
-            position={[0.16, -0.145, 0.012]}
-            size={[0.13, 0.052, 0.012]}
-            label="Scale -"
-            onClick={() =>
-              arContext.setArScale((s) => Math.max(0.3, s - 0.12))
-            }
-          />
-          <Spatial3DButton
-            position={[0.31, -0.145, 0.012]}
-            size={[0.13, 0.052, 0.012]}
-            label="Scale +"
-            onClick={() =>
-              arContext.setArScale((s) => Math.min(1.4, s + 0.12))
-            }
-          />
-          <Spatial3DButton
-            position={[0.47, -0.145, 0.012]}
-            size={[0.15, 0.052, 0.012]}
-            label="Move Lab"
-            accentColor="#f59e0b"
-            onClick={() => arContext.resetAnchor()}
-          />
+          {/* ================================================================
+              ZONE 1: LEFT WING POD (NARRATION, BEAT TITLE & SYNC ANCHORS)
+              Anchored outside the left edge of the bench, angled +26 deg inward
+          ================================================================ */}
+          <group
+            position={[-0.86, 0.25, 0.14]}
+            rotation={[-0.18, 0.46, 0]}
+            frustumCulled={false}
+          >
+            {/* Left Frosted Glass Backplate */}
+            <RoundedBox
+              args={[0.62, 0.42, 0.014]}
+              radius={0.022}
+              smoothness={4}
+              frustumCulled={false}
+            >
+              <meshStandardMaterial
+                color="#0c0a09"
+                roughness={0.15}
+                metalness={0.4}
+                transparent
+                opacity={0.86}
+              />
+            </RoundedBox>
+
+            {/* Top Emerald Accent Header */}
+            <Text
+              position={[0, 0.165, 0.011]}
+              fontSize={0.019}
+              color="#34d399"
+              anchorX="center"
+              anchorY="middle"
+              maxWidth={0.56}
+            >
+              {`BEAT ${currentBeatIdx + 1}/${totalBeats}: ${
+                currentBeat?.conceptTitle || ''
+              }`}
+            </Text>
+
+            {/* Spoken Narration Subtitle */}
+            <Text
+              position={[0, 0.055, 0.011]}
+              fontSize={0.0165}
+              color="#f5f5f4"
+              anchorX="center"
+              anchorY="middle"
+              textAlign="center"
+              maxWidth={0.55}
+            >
+              {activeSpokenSegment}
+            </Text>
+
+            {/* Sync Anchor Triggers */}
+            <Text
+              position={[-0.22, -0.055, 0.011]}
+              fontSize={0.013}
+              color="#a8a29e"
+              anchorX="left"
+              anchorY="middle"
+            >
+              WORD SYNC:
+            </Text>
+            {(currentBeat?.narrationSegments || []).map(
+              (seg: any, idx: number) => (
+                <Spatial3DButton
+                  key={seg.segmentId}
+                  position={[-0.04 + idx * 0.14, -0.055, 0.011]}
+                  size={[0.12, 0.045, 0.01]}
+                  label={seg.syncMarker.replace('anchor_', 'Sync ')}
+                  active={unlockedSyncMarkers.includes(seg.syncMarker)}
+                  accentColor="#38bdf8"
+                  onClick={() => onTriggerSyncIndex(idx)}
+                />
+              )
+            )}
+
+            {/* Transport Row */}
+            <Spatial3DButton
+              position={[-0.19, -0.14, 0.011]}
+              size={[0.16, 0.048, 0.01]}
+              label="<< Prev"
+              onClick={onPrevBeat}
+            />
+            <Spatial3DButton
+              position={[0, -0.14, 0.011]}
+              size={[0.18, 0.048, 0.01]}
+              label={isPlaying ? 'PAUSE' : 'PLAY'}
+              active={isPlaying}
+              onClick={() => setIsPlaying((p) => !p)}
+            />
+            <Spatial3DButton
+              position={[0.19, -0.14, 0.011]}
+              size={[0.16, 0.048, 0.01]}
+              label="Next >>"
+              onClick={onNextBeat}
+            />
+          </group>
+
+          {/* ================================================================
+              ZONE 2: RIGHT WING POD (MANIM FORMULA, PHYSICS SLIDER & AR TOOLS)
+              Anchored outside the right edge of the bench, angled -26 deg inward
+          ================================================================ */}
+          <group
+            position={[0.86, 0.25, 0.14]}
+            rotation={[-0.18, -0.46, 0]}
+            frustumCulled={false}
+          >
+            {/* Right Frosted Glass Backplate */}
+            <RoundedBox
+              args={[0.62, 0.42, 0.014]}
+              radius={0.022}
+              smoothness={4}
+              frustumCulled={false}
+            >
+              <meshStandardMaterial
+                color="#0c0a09"
+                roughness={0.15}
+                metalness={0.4}
+                transparent
+                opacity={0.86}
+              />
+            </RoundedBox>
+
+            {/* Right Panel Header */}
+            <Text
+              position={[0, 0.165, 0.011]}
+              fontSize={0.018}
+              color="#38bdf8"
+              anchorX="center"
+              anchorY="middle"
+              maxWidth={0.56}
+            >
+              MANIM FORMULA & CONTROLS
+            </Text>
+
+            {/* Formula Box */}
+            <Text
+              position={[0, 0.105, 0.011]}
+              fontSize={0.0165}
+              color="#fde047"
+              anchorX="center"
+              anchorY="middle"
+              textAlign="center"
+              maxWidth={0.55}
+            >
+              {formulaLatex}
+            </Text>
+
+            {/* Interactive Gate Prompt */}
+            <Text
+              position={[0, 0.035, 0.011]}
+              fontSize={0.0145}
+              color="#d6d3d1"
+              anchorX="center"
+              anchorY="middle"
+              textAlign="center"
+              maxWidth={0.55}
+            >
+              {currentBeat?.interactionGate?.promptText ||
+                'Tap or adjust parameter below:'}
+            </Text>
+
+            {/* Parameter Stepper Row */}
+            <Spatial3DButton
+              position={[-0.2, -0.055, 0.011]}
+              size={[0.14, 0.048, 0.01]}
+              label="Param [-]"
+              accentColor="#38bdf8"
+              onClick={() => onStepSlider(-0.15)}
+            />
+            <Text
+              position={[0, -0.055, 0.011]}
+              fontSize={0.0155}
+              color={gateCompleted ? '#34d399' : '#ffffff'}
+              anchorX="center"
+              anchorY="middle"
+              maxWidth={0.22}
+            >
+              {`${
+                currentBeat?.interactionGate?.drivenProperty || 'val'
+              }: ${sliderValue.toFixed(2)}`}
+            </Text>
+            <Spatial3DButton
+              position={[0.2, -0.055, 0.011]}
+              size={[0.14, 0.048, 0.01]}
+              label="Param [+]"
+              accentColor="#38bdf8"
+              onClick={() => onStepSlider(0.15)}
+            />
+
+            {/* AR Scale & Move Lab Row */}
+            {arContext?.isAR && (
+              <>
+                <Spatial3DButton
+                  position={[-0.19, -0.14, 0.011]}
+                  size={[0.15, 0.048, 0.01]}
+                  label="Scale -"
+                  onClick={() =>
+                    arContext.setArScale((s) => Math.max(0.3, s - 0.1))
+                  }
+                />
+                <Spatial3DButton
+                  position={[0, -0.14, 0.011]}
+                  size={[0.15, 0.048, 0.01]}
+                  label="Scale +"
+                  onClick={() =>
+                    arContext.setArScale((s) => Math.min(1.4, s + 0.1))
+                  }
+                />
+                <Spatial3DButton
+                  position={[0.19, -0.14, 0.011]}
+                  size={[0.17, 0.048, 0.01]}
+                  label="Move Lab"
+                  accentColor="#f59e0b"
+                  onClick={() => arContext.resetAnchor()}
+                />
+              </>
+            )}
+          </group>
         </>
       )}
     </group>
