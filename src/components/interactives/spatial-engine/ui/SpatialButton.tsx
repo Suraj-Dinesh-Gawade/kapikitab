@@ -14,7 +14,7 @@ interface SpatialButtonProps {
 
 export default function SpatialButton({ position, label, onTrigger, isPrimary = false, isDanger = false }: SpatialButtonProps) {
   const [pressed, setPressed] = useState(false);
-  const resetAnchor = useARAnchor();
+  const arContext = useARAnchor();
 
   const baseColor = isDanger ? "#7f1d1d" : (isPrimary ? "#44403c" : "#292524");
   const highlightColor = isDanger ? "#ef4444" : "#10b981"; 
@@ -36,8 +36,8 @@ export default function SpatialButton({ position, label, onTrigger, isPrimary = 
     e.stopPropagation();
     setPressed(false);
     
-    if (isDanger && label === "RE-ANCHOR" && resetAnchor) {
-      resetAnchor();
+    if (isDanger && label === "RE-ANCHOR" && arContext) {
+      arContext.resetAnchor();
     } else {
       onTrigger();
     }
