@@ -25,3 +25,25 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.4);
   }
 }
+
+/* ==========================================================================
+   SMART HIDE / SHOW CONTROLS TOGGLE (Protects 2D HTML Simulations)
+   ========================================================================== */
+
+/* 1. Hide the "Hide Controls" button automatically on pure 2D grid simulations 
+      (like Brahmagupta's Ledger) that don't have floating .absolute overlays or a canvas */
+.sim-global-shell:not(:has(canvas)):not(:has(.sim-inner-stage > div > .absolute)) > button {
+  display: none !important;
+}
+
+/* 2. Smoothly transition ONLY floating (.absolute) overlay panels */
+.sim-inner-stage > div > .absolute:not(:has(canvas)):not(canvas) {
+  transition: opacity 0.25s ease !important;
+}
+
+/* 3. When user clicks "Hide Controls", ONLY fade out floating (.absolute) cards 
+      so 2D grids and the 3D/2D canvas are never blanked out */
+.sim-global-shell.sim-hide-ui .sim-inner-stage > div > .absolute:not(:has(canvas)):not(canvas) {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

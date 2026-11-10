@@ -141,13 +141,14 @@ export default function SimulationPage() {
         {/* Right Side: LIVE WEBXR MODEL VIEWER OR R3F ENGINE */}
         <div className={`relative z-20 flex items-center justify-center cursor-grab active:cursor-grabbing transition-all duration-700 ease-in-out ${
           isIsolated ? 'w-full h-full flex-1' : 'w-full md:w-2/3 h-[400px] md:h-full'
-        }`}>
-          
+          }`}>
+          {/* Added this div */}
+          <div className="sim-responsive-viewport w-full h-full flex items-center justify-center overflow-hidden"></div>
           <SimulationRouter 
             activeSim={activeSim} 
             isFullscreen={isFullscreen} 
           />
-          
+          </div>
           {/* Panning & Zooming Hint Toast */}
           <AnimatePresence>
             {isIsolated && (
@@ -161,7 +162,6 @@ export default function SimulationPage() {
             )}
           </AnimatePresence>
         </div>
-      </div>
 
       {/* --- CAROUSEL OF OTHER LABS --- */}
       <div className={`mt-10 transition-all duration-500 ${isFullscreen ? 'opacity-0 hidden' : 'opacity-100'}`}>

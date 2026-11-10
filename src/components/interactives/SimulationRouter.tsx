@@ -2,6 +2,7 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
+import SimContainer from '@/components/SimContainer';
 
 // Domain 1 has been deleted.
 
@@ -54,9 +55,12 @@ const spatialEngineRegistry: Record<string, React.ComponentType<any>> = {
 // ==================================================================
 // THE ORCHESTRATOR
 // ==================================================================
+//added subtitle and description
 interface SimulationRouterProps {
   activeSim: {
     title: string;
+    subtitle?: string;
+    description?: string;
     modelUrl?: string;
     componentRef?: string;
   };
@@ -65,42 +69,53 @@ interface SimulationRouterProps {
 
 export default function SimulationRouter({ activeSim, isFullscreen }: SimulationRouterProps) {
   const ref = activeSim?.componentRef;
-console.log("ROUTER DIAGNOSTIC -> Received Ref:", ref, "| Found in Registry:", !!MasterSimulationRegistry[ref as keyof typeof MasterSimulationRegistry]);
-  // If the admin assigned a specific code file in the database:
+  console.log("ROUTER DIAGNOSTIC -> Received Ref:", ref, "| Found in Registry:", !!MasterSimulationRegistry[ref as keyof typeof MasterSimulationRegistry]);
+
+  //added content variable, and in each route instaed of return storing the value in the content variable.And also wrap them into SimContainer
+  
+ let content = null;
+
   if (ref) {
-    
-    // NEW ROUTE: Check Master Curriculum Registry First
-    // FIX: Using the correct variable name "MasterSimulationRegistry"
+    // Route 1: Master Curriculum Registry
     if (MasterSimulationRegistry[ref as keyof typeof MasterSimulationRegistry]) {
       const CurriculumSim = MasterSimulationRegistry[ref as keyof typeof MasterSimulationRegistry];
-      return <CurriculumSim modelUrl={activeSim.modelUrl} isFullscreen={isFullscreen} title={activeSim.title} />;
+      content = <CurriculumSim modelUrl={activeSim.modelUrl} isFullscreen={isFullscreen} title={activeSim.title} />;
     }
-
-
     // Route 2: DOMAIN 3 (The Spatial Engine)
-    if (spatialEngineRegistry[ref]) {
+    else if (spatialEngineRegistry[ref]) {
       const SpatialLab = spatialEngineRegistry[ref];
-      return <SpatialLab modelUrl={activeSim.modelUrl} isFullscreen={isFullscreen} title={activeSim.title} />;
+      content = <SpatialLab modelUrl={activeSim.modelUrl} isFullscreen={isFullscreen} title={activeSim.title} />;
     }
-
     // Route 3: DOMAIN 2
-    if (modelViewerRegistry[ref]) {
+    else if (modelViewerRegistry[ref]) {
       const ModelViewerWrapper = modelViewerRegistry[ref];
-      return <ModelViewerWrapper modelUrl={activeSim.modelUrl} isFullscreen={isFullscreen} title={activeSim.title} />;
+      content = <ModelViewerWrapper modelUrl={activeSim.modelUrl} isFullscreen={isFullscreen} title={activeSim.title} />;
     }
   }
 
-  // Route 4: Fallback
-  // The admin uploaded a 3D model but didn't assign any code to it.
-  if (activeSim?.modelUrl) {
-    return <XRViewer src={activeSim.modelUrl} alt={activeSim.title} isFullscreen={isFullscreen} />;
+  // Route 4: Fallback (3D Model with no code)
+  if (!content && activeSim?.modelUrl) {
+    content = <XRViewer src={activeSim.modelUrl} alt={activeSim.title} isFullscreen={isFullscreen} />;
   }
 
-  // Error Catching
+  // Error Catching Fallback
+  if (!content) {
+    content = (
+      <div className="p-6 bg-red-950/30 border border-red-900 rounded-xl text-red-400 text-sm flex flex-col items-center justify-center h-full min-h-[400px]">
+        <strong>Configuration Error</strong>
+        <p>Simulation "{ref || 'Unknown'}" is missing from the Router.</p>
+      </div>
+    );
+  }
+
+  // Wrap the chosen simulation content once inside SimContainer
   return (
-    <div className="p-6 bg-red-950/30 border border-red-900 rounded-xl text-red-400 text-sm flex flex-col items-center justify-center h-full min-h-[400px]">
-      <strong>Configuration Error</strong>
-      <p>Simulation "{ref || 'Unknown'}" is missing from the Router.</p>
-    </div>
+    <SimContainer
+      title={activeSim.title}
+      subtitle={activeSim.subtitle}
+      statusText={activeSim.description}
+    >
+      {content}
+    </SimContainer>
   );
 }
